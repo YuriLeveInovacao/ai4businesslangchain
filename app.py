@@ -16,10 +16,6 @@ from pypdf.errors import PdfReadError
 # Importação corrigida para os erros da biblioteca OpenAI (v1+)
 from openai import AuthenticationError, BadRequestError, APIError
 
-# Adicionar a imagem no cabeçalho
-image_url = "https://cienciadosdados.com/images/CINCIA_DOS_DADOS_4.png"
-st.image(image_url, use_column_width=True)
-
 # Adicionar o nome do aplicativo
 st.subheader("Q&A com IA - PLN usando LangChain")
 
