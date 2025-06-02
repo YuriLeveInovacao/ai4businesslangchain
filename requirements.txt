@@ -1,5 +1,5 @@
 langchain
-langchain-community
+langchain-community # Provavelmente necessária para outros componentes
 langchain-openai
 chromadb
 pypdf
@@ -8,3 +8,4 @@ tiktoken
 pytesseract
 Pillow
 python-docx
+pysqlite3-binary
