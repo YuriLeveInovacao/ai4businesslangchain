@@ -1,3 +1,5 @@
+--- START OF FILE app (1).py ---
+
 import os
 import tempfile
 import pandas as pd
@@ -5,25 +7,38 @@ import pytesseract
 from PIL import Image
 import docx
 import streamlit as st
+
+# workaround para sqlite3 em ambientes como Streamlit Cloud
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# Fim do workaround sqlite3
+
+
 from langchain.chains import RetrievalQA
-from langchain_openai import ChatOpenAI  # Já estava correto do passo anterior
-# Importação corrigida para OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain.document_loaders import PyPDFLoader, TextLoader
 from langchain.text_splitter import CharacterTextSplitter
-from langchain.vectorstores import Chroma
+from langchain.vectorstores import Chroma # Este import agora usará a versão de pysqlite3
 from pypdf.errors import PdfReadError
 # Importação corrigida para os erros da biblioteca OpenAI (v1+)
 from openai import AuthenticationError, BadRequestError, APIError
+
+# Adicionar a imagem no cabeçalho
+image_url = "https://cienciadosdados.com/images/CINCIA_DOS_DADOS_4.png"
+# CORREÇÃO: Substituindo use_column_width por use_container_width
+st.image(image_url, use_container_width=True)
 
 # Adicionar o nome do aplicativo
 st.subheader("Q&A com IA - PLN usando LangChain")
 
 # Componentes interativos
 file_input = st.file_uploader("Upload a file", type=['pdf', 'txt', 'csv', 'docx', 'jpeg', 'png'])
-# Nota: Não é recomendado incluir a chave de API diretamente no código.
+# Nota: Não é recomendado incluir a chave de API diretamente no código ou no input padrão.
 # Use variáveis de ambiente ou st.secrets (recomendado no Streamlit Cloud).
 # Mantendo a estrutura original conforme solicitado, mas esteja ciente dessa prática.
+# O texto padrão do input foi removido, pois não deve conter a chave de API.
 openaikey = st.text_input("Enter your OpenAI API Key", type='password')
 prompt = st.text_area("Enter your questions", height=160)
 run_button = st.button("Run!")
@@ -34,21 +49,33 @@ select_chain_type = st.radio("Chain type", ['stuff', 'map_reduce', "refine", "ma
 # Função para carregar documentos
 def load_document(file_path, file_type):
     if file_type == 'application/pdf':
-        loader = PyPDFLoader(file_path)
-        return loader.load()
+        try:
+            loader = PyPDFLoader(file_path)
+            return loader.load()
+        except PdfReadError as e:
+             st.error(f"Error reading PDF file: {e}")
+             return None
     elif file_type == 'text/plain':
         loader = TextLoader(file_path)
         return loader.load()
     elif file_type == 'text/csv':
-        df = pd.read_csv(file_path)
-        # Convertendo o DataFrame para string. Pode precisar de ajustes dependendo do CSV
-        return [{"page_content": df.to_string(index=False)}]
+        try:
+            df = pd.read_csv(file_path)
+            # Convertendo o DataFrame para string. Pode precisar de ajustes dependendo do CSV
+            return [{"page_content": df.to_string(index=False)}]
+        except Exception as e:
+            st.error(f"Error reading CSV file: {e}")
+            return None
     elif file_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-        doc = docx.Document(file_path)
-        full_text = []
-        for para in doc.paragraphs:
-            full_text.append(para.text)
-        return [{"page_content": "\n".join(full_text)}]
+        try:
+            doc = docx.Document(file_path)
+            full_text = []
+            for para in doc.paragraphs:
+                full_text.append(para.text)
+            return [{"page_content": "\n".join(full_text)}]
+        except Exception as e:
+            st.error(f"Error reading DOCX file: {e}")
+            return None
     elif file_type in ['image/jpeg', 'image/png']:
         try:
             # Garante que o Tesseract está instalado no ambiente de deploy
@@ -56,6 +83,9 @@ def load_document(file_path, file_type):
             return [{"page_content": text}]
         except pytesseract.TesseractNotFoundError:
             st.error("Tesseract is not installed or not in PATH. OCR requires Tesseract.")
+            return None
+        except Exception as e:
+            st.error(f"Error processing image file with Tesseract: {e}")
             return None
     else:
         st.error("Unsupported file type.")
@@ -69,7 +99,8 @@ def qa(file_path, file_type, query, chain_type, k):
             return None
 
         # split the documents into chunks
-        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+        # Ajustei chunk_overlap para 200 para evitar cortar palavras no meio e manter contexto
+        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         texts = text_splitter.split_documents(documents)
 
         # select which embeddings we want to use
@@ -94,9 +125,6 @@ def qa(file_path, file_type, query, chain_type, k):
         )
         result = qa({"query": query})
         return result
-    except PdfReadError as e:
-        st.error(f"Error reading PDF file: {e}")
-        return None
     except AuthenticationError as e: # Usa a classe importada de openai
         st.error(f"Authentication error: {e}")
         return None
@@ -107,7 +135,7 @@ def qa(file_path, file_type, query, chain_type, k):
         st.error(f"General OpenAI API error: {e}")
         return None
     except Exception as e: # Captura outros erros não específicos da API
-        st.error(f"An unexpected error occurred: {e}")
+        st.error(f"An unexpected error occurred during QA processing: {e}")
         # Opcional: imprimir o traceback completo para debug nos logs do Streamlit Cloud
         # import traceback
         # st.error(traceback.format_exc())
@@ -118,13 +146,15 @@ def qa(file_path, file_type, query, chain_type, k):
 def display_result(result):
     if result:
         st.markdown("### Result:")
-        st.write(result["result"])
+        st.write(result.get("result", "No answer found.")) # Use .get para evitar KeyError
         if "source_documents" in result and result["source_documents"]:
             st.markdown("### Relevant source text:")
             for i, doc in enumerate(result["source_documents"]):
                 st.markdown(f"**Source Document {i+1}:**")
                 st.markdown(doc.page_content)
                 st.markdown("---")
+        elif "source_documents" not in result:
+             st.info("No source documents returned by the QA chain.") # Informa se não há fontes (alguns chain_types não retornam)
 
 
 # Execução do app
@@ -134,26 +164,38 @@ if run_button and file_input and openaikey and prompt:
 
     with st.spinner("Running QA..."):
         # Salvar o arquivo em um local temporário
-        # Crie o diretório temporário se não existir (tempfile.gettempdir() já faz isso)
-        # Assegure-se de que o arquivo temporário seja fechado/removido se necessário,
-        # mas para um app Streamlit simples, o ambiente temporário geralmente lida com isso.
+        # tempfile.gettempdir() já cria o diretório se necessário.
         temp_file_path = os.path.join(tempfile.gettempdir(), file_input.name)
-        with open(temp_file_path, "wb") as temp_file:
-            temp_file.write(file_input.read())
-
-        # Verificar se a chave de API é válida
         try:
-            # Testar a chave de API com uma chamada simples
-            # Instanciar embeddings para testar a chave. Isso pode lançar AuthenticationError.
-            embeddings_test = OpenAIEmbeddings()
-            embeddings_test.embed_documents(["test"])
-            # Se o teste passou, continue com o QA
-            result = qa(temp_file_path, file_input.type, prompt, select_chain_type, select_k)
-            # Exibir o resultado
-            display_result(result)
-        except AuthenticationError as e: # Usa a classe importada de openai
-            st.error(f"Invalid OpenAI API Key: {e}")
-        except APIError as e: # Captura outros erros da API durante o teste (ex: limite de rate)
-             st.error(f"Error testing OpenAI API Key: {e}")
-        except Exception as e: # Captura outros erros inesperados durante o teste
-             st.error(f"An unexpected error occurred during API key test: {e}")
+            with open(temp_file_path, "wb") as temp_file:
+                temp_file.write(file_input.read())
+
+            # Verificar se a chave de API é válida (opcional, mas boa prática)
+            try:
+                # Testar a chave de API com uma chamada simples
+                # Instanciar embeddings para testar a chave. Isso pode lançar AuthenticationError.
+                embeddings_test = OpenAIEmbeddings()
+                embeddings_test.embed_documents(["test"])
+
+                # Se o teste passou, continue com o QA
+                result = qa(temp_file_path, file_input.type, prompt, select_chain_type, select_k)
+                # Exibir o resultado
+                display_result(result)
+
+            except AuthenticationError as e: # Usa a classe importada de openai
+                st.error(f"Invalid OpenAI API Key: {e}")
+            except BadRequestError as e: # Captura erros de requisição durante o teste
+                 st.error(f"Bad request during API key test: {e}")
+            except APIError as e: # Captura outros erros da API durante o teste (ex: limite de rate)
+                 st.error(f"Error testing OpenAI API Key: {e}")
+            except Exception as e: # Captura outros erros inesperados durante o teste
+                 st.error(f"An unexpected error occurred during API key test: {e}")
+
+        finally:
+            # Opcional: Tentar remover o arquivo temporário após o uso
+            # Pode não ser estritamente necessário no Streamlit Cloud, mas é boa prática.
+            if os.path.exists(temp_file_path):
+                 try:
+                     os.remove(temp_file_path)
+                 except Exception as e:
+                     st.warning(f"Could not remove temporary file {temp_file_path}: {e}")
