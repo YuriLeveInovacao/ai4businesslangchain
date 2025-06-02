@@ -6,7 +6,7 @@ from PIL import Image
 import docx
 import streamlit as st
 from langchain.chains import RetrievalQA
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.document_loaders import PyPDFLoader, TextLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
@@ -23,7 +23,7 @@ st.subheader("Q&A com IA - PLN usando LangChain")
 
 # Componentes interativos
 file_input = st.file_uploader("Upload a file", type=['pdf', 'txt', 'csv', 'docx', 'jpeg', 'png'])
-openaikey = st.text_input("Enter your OpenAI API Key", type='password')
+openaikey = st.text_input("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", type='password')
 prompt = st.text_area("Enter your questions", height=160)
 run_button = st.button("Run!")
 
